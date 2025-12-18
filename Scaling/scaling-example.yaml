@@ -1,0 +1,120 @@
+# ============================================
+# Kubernetes Scaling Basics Example
+# Scenario: E-commerce app with traffic spikes
+# ============================================
+
+---
+# 1. Deployment - Simple web application
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-app
+  labels:
+    app: web-app
+spec:
+  replicas: 2  # Start with 2 replicas
+  selector:
+    matchLabels:
+      app: web-app
+  template:
+    metadata:
+      labels:
+        app: web-app
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.24
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            cpu: 100m      # Request 100 millicores
+            memory: 128Mi
+          limits:
+            cpu: 200m      # Limit to 200 millicores
+            memory: 256Mi
+
+---
+# 2. Service - Expose the application
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-app-service
+spec:
+  selector:
+    app: web-app
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+  type: LoadBalancer
+
+---
+# 3. HorizontalPodAutoscaler - Automatic scaling based on CPU
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: web-app-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: web-app
+  minReplicas: 2              # Minimum pods during low traffic
+  maxReplicas: 10             # Maximum pods during peak hours
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70  # Scale when CPU > 70%
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+    scaleDown:
+      stabilizationWindowSeconds: 300  # Wait 5 min before scaling down
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 60
+
+---
+# ============================================
+# MANUAL SCALING COMMANDS (run with kubectl)
+# ============================================
+
+# View current deployment status:
+# kubectl get deployment web-app
+
+# Scale manually to 5 replicas (for business hours):
+# kubectl scale deployment web-app --replicas=5
+
+# Scale back down after traffic spike:
+# kubectl scale deployment web-app --replicas=2
+
+# Check HPA status:
+# kubectl get hpa web-app-hpa
+
+# Watch HPA in action:
+# kubectl get hpa web-app-hpa --watch
+
+# View detailed HPA information:
+# kubectl describe hpa web-app-hpa
+
+# ============================================
+# TESTING THE AUTOSCALER
+# ============================================
+
+# Generate load to trigger autoscaling:
+# kubectl run -i --tty load-generator --rm --image=busybox --restart=Never -- /bin/sh
+# Then inside the pod, run:
+# while true; do wget -q -O- http://web-app-service; done
+
+# In another terminal, watch the scaling happen:
+# kubectl get hpa web-app-hpa --watch
+# kubectl get pods -l app=web-app --watch

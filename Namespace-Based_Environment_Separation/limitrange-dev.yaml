@@ -1,0 +1,79 @@
+# limitrange-dev.yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: dev-limits
+  namespace: app-dev
+spec:
+  limits:
+  # Container limits
+  - type: Container
+    default:
+      cpu: 500m
+      memory: 512Mi
+    defaultRequest:
+      cpu: 100m
+      memory: 128Mi
+    max:
+      cpu: 2
+      memory: 4Gi
+    min:
+      cpu: 50m
+      memory: 64Mi
+  # Pod limits
+  - type: Pod
+    max:
+      cpu: 4
+      memory: 8Gi
+---
+# limitrange-staging.yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: staging-limits
+  namespace: app-staging
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: 1
+      memory: 1Gi
+    defaultRequest:
+      cpu: 250m
+      memory: 256Mi
+    max:
+      cpu: 4
+      memory: 8Gi
+    min:
+      cpu: 100m
+      memory: 128Mi
+  - type: Pod
+    max:
+      cpu: 8
+      memory: 16Gi
+---
+# limitrange-prod.yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: prod-limits
+  namespace: app-prod
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: 2
+      memory: 2Gi
+    defaultRequest:
+      cpu: 500m
+      memory: 512Mi
+    max:
+      cpu: 8
+      memory: 16Gi
+    min:
+      cpu: 100m
+      memory: 128Mi
+  - type: Pod
+    max:
+      cpu: 16
+      memory: 32Gi

@@ -1,0 +1,76 @@
+# Namespace for the application
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: legacy-web
+
+---
+# Deployment for the legacy web service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: legacy-web-deployment
+  namespace: legacy-web
+  labels:
+    app: legacy-web
+    tier: frontend
+    version: v1
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: legacy-web
+      tier: frontend
+  template:
+    metadata:
+      labels:
+        app: legacy-web
+        tier: frontend
+        version: v1
+    spec:
+      containers:
+      - name: web-container
+        image: nginx:1.24  # Replace with your legacy app image
+        ports:
+        - containerPort: 80
+          name: http
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+
+---
+# Service (ClusterIP) to expose the deployment internally
+apiVersion: v1
+kind: Service
+metadata:
+  name: legacy-web-service
+  namespace: legacy-web
+  labels:
+    app: legacy-web
+spec:
+  type: ClusterIP
+  selector:
+    app: legacy-web
+    tier: frontend
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+    name: http
+  sessionAffinity: None

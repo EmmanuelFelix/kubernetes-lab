@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-settings
+data:
+  config.json: |
+    {
+      "app": {
+        "name": "MyApp",
+        "version": "1.0.0",
+        "features": {
+          "auth": true,
+          "logging": true
+        }
+      }
+    }

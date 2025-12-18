@@ -1,0 +1,321 @@
+# ============================================================================
+# KUBERNETES AUTOSCALING EXAMPLES
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 1. CLUSTER AUTOSCALER SETUP (Conceptual for kind/local clusters)
+# ----------------------------------------------------------------------------
+# NOTE: Cluster Autoscaler works with cloud providers (GKE, EKS, AKS)
+# For kind/minikube, we'll demonstrate the concepts with resource constraints
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: autoscaling-demo
+
+# ----------------------------------------------------------------------------
+# 2. RESOURCE-CONSTRAINED DEPLOYMENT
+# This deployment will trigger node capacity issues
+# ----------------------------------------------------------------------------
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memory-intensive-app
+  namespace: autoscaling-demo
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: memory-app
+  template:
+    metadata:
+      labels:
+        app: memory-app
+        priority: high
+    spec:
+      # Pod Priority for eviction scenarios
+      priorityClassName: high-priority
+      containers:
+      - name: stress
+        image: polinux/stress
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        command: ["stress"]
+        args:
+        - "--vm"
+        - "1"
+        - "--vm-bytes"
+        - "450M"
+        - "--vm-hang"
+        - "1"
+
+# ----------------------------------------------------------------------------
+# 3. PRIORITY CLASSES FOR POD EVICTION
+# Higher priority pods are less likely to be evicted
+# ----------------------------------------------------------------------------
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: high-priority
+value: 1000
+globalDefault: false
+description: "High priority pods for critical workloads"
+
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: low-priority
+value: 100
+globalDefault: false
+description: "Low priority pods that can be evicted first"
+
+# ----------------------------------------------------------------------------
+# 4. LOW PRIORITY DEPLOYMENT (Will be evicted first)
+# ----------------------------------------------------------------------------
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: low-priority-app
+  namespace: autoscaling-demo
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: low-priority-app
+  template:
+    metadata:
+      labels:
+        app: low-priority-app
+    spec:
+      priorityClassName: low-priority
+      containers:
+      - name: nginx
+        image: nginx:alpine
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+# ----------------------------------------------------------------------------
+# 5. POD DISRUPTION BUDGET (PDB)
+# Protects against too many simultaneous evictions
+# ----------------------------------------------------------------------------
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: memory-app-pdb
+  namespace: autoscaling-demo
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: memory-app
+
+# ----------------------------------------------------------------------------
+# 6. BIN-PACKING OPTIMIZATION DEPLOYMENT
+# Demonstrates efficient resource utilization
+# ----------------------------------------------------------------------------
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bin-packed-app
+  namespace: autoscaling-demo
+spec:
+  replicas: 10
+  selector:
+    matchLabels:
+      app: bin-packed
+  template:
+    metadata:
+      labels:
+        app: bin-packed
+    spec:
+      # Affinity rules for bin-packing
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - bin-packed
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: app
+        image: nginx:alpine
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+
+# ----------------------------------------------------------------------------
+# 7. HORIZONTAL POD AUTOSCALER (HPA)
+# Scales pods based on metrics
+# ----------------------------------------------------------------------------
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: memory-app-hpa
+  namespace: autoscaling-demo
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: memory-intensive-app
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+# ----------------------------------------------------------------------------
+# 8. RESOURCE QUOTA (Namespace-level constraints)
+# ----------------------------------------------------------------------------
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: autoscaling-quota
+  namespace: autoscaling-demo
+spec:
+  hard:
+    requests.cpu: "10"
+    requests.memory: "20Gi"
+    limits.cpu: "20"
+    limits.memory: "40Gi"
+    pods: "50"
+
+# ----------------------------------------------------------------------------
+# 9. LIMIT RANGE (Default resource constraints)
+# ----------------------------------------------------------------------------
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: autoscaling-limits
+  namespace: autoscaling-demo
+spec:
+  limits:
+  - max:
+      memory: "2Gi"
+      cpu: "2"
+    min:
+      memory: "64Mi"
+      cpu: "50m"
+    default:
+      memory: "512Mi"
+      cpu: "500m"
+    defaultRequest:
+      memory: "256Mi"
+      cpu: "250m"
+    type: Container
+
+# ----------------------------------------------------------------------------
+# 10. NODE AFFINITY EXAMPLE
+# Demonstrates bin-packing with node selection
+# ----------------------------------------------------------------------------
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: node-affinity-app
+  namespace: autoscaling-demo
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: node-affinity
+  template:
+    metadata:
+      labels:
+        app: node-affinity
+    spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 80
+            preference:
+              matchExpressions:
+              - key: node-type
+                operator: In
+                values:
+                - high-memory
+          - weight: 20
+            preference:
+              matchExpressions:
+              - key: node-type
+                operator: In
+                values:
+                - standard
+      containers:
+      - name: app
+        image: nginx:alpine
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+
+# ----------------------------------------------------------------------------
+# TESTING COMMANDS
+# ----------------------------------------------------------------------------
+# 1. Apply all resources:
+#    kubectl apply -f autoscaling-examples.yaml
+
+# 2. Watch pod status and evictions:
+#    kubectl get pods -n autoscaling-demo -w
+
+# 3. Check node resource usage:
+#    kubectl top nodes
+
+# 4. Check pod resource usage:
+#    kubectl top pods -n autoscaling-demo
+
+# 5. Describe node to see pressure conditions:
+#    kubectl describe nodes
+
+# 6. Check HPA status:
+#    kubectl get hpa -n autoscaling-demo
+
+# 7. Scale deployment to trigger capacity issues:
+#    kubectl scale deployment memory-intensive-app -n autoscaling-demo --replicas=15
+
+# 8. Check events for evictions:
+#    kubectl get events -n autoscaling-demo --sort-by='.lastTimestamp'
+
+# 9. View pod priority:
+#    kubectl get pods -n autoscaling-demo -o custom-columns=NAME:.metadata.name,PRIORITY:.spec.priorityClassName
+
+# 10. Check resource quotas:
+#     kubectl describe resourcequota -n autoscaling-demo

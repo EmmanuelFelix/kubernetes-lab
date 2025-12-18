@@ -1,0 +1,268 @@
+---
+# Namespace for the demo
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: health-demo
+
+---
+# ConfigMap with a simple web server that simulates health states
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: health-app
+  namespace: health-demo
+data:
+  app.py: |
+    from flask import Flask, jsonify
+    import os
+    import time
+    
+    app = Flask(__name__)
+    start_time = time.time()
+    
+    # Simulated state files
+    READY_FILE = '/tmp/ready'
+    HEALTHY_FILE = '/tmp/healthy'
+    
+    @app.route('/')
+    def home():
+        return jsonify({
+            'status': 'running',
+            'uptime': int(time.time() - start_time),
+            'pod': os.getenv('HOSTNAME', 'unknown')
+        })
+    
+    @app.route('/ready')
+    def ready():
+        # Readiness probe - checks if app can serve traffic
+        if os.path.exists(READY_FILE):
+            return jsonify({'status': 'ready'}), 200
+        return jsonify({'status': 'not ready'}), 503
+    
+    @app.route('/healthz')
+    def health():
+        # Liveness probe - checks if app needs restart
+        if os.path.exists(HEALTHY_FILE):
+            return jsonify({'status': 'healthy'}), 200
+        return jsonify({'status': 'unhealthy'}), 500
+    
+    @app.route('/fail-ready')
+    def fail_ready():
+        # Simulate readiness failure (stop accepting traffic)
+        if os.path.exists(READY_FILE):
+            os.remove(READY_FILE)
+        return jsonify({'message': 'Readiness probe will fail'}), 200
+    
+    @app.route('/fail-liveness')
+    def fail_liveness():
+        # Simulate liveness failure (trigger restart)
+        if os.path.exists(HEALTHY_FILE):
+            os.remove(HEALTHY_FILE)
+        return jsonify({'message': 'Liveness probe will fail, pod will restart'}), 200
+    
+    @app.route('/recover')
+    def recover():
+        # Recover from failures
+        open(READY_FILE, 'w').close()
+        open(HEALTHY_FILE, 'w').close()
+        return jsonify({'message': 'Health restored'}), 200
+    
+    if __name__ == '__main__':
+        # Initialize as healthy and ready
+        open(READY_FILE, 'w').close()
+        open(HEALTHY_FILE, 'w').close()
+        app.run(host='0.0.0.0', port=8080)
+
+---
+# Deployment with health probes configured
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: health-demo-app
+  namespace: health-demo
+  labels:
+    app: health-demo
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: health-demo
+  template:
+    metadata:
+      labels:
+        app: health-demo
+    spec:
+      containers:
+      - name: app
+        image: python:3.9-slim
+        ports:
+        - containerPort: 8080
+          name: http
+        command:
+        - /bin/sh
+        - -c
+        - |
+          pip install flask > /dev/null 2>&1
+          python /app/app.py
+        volumeMounts:
+        - name: app-code
+          mountPath: /app
+        
+        # READINESS PROBE (HTTP)
+        # Determines if pod should receive traffic from Service
+        # Failure = pod removed from Service endpoints (no traffic)
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 5    # Wait before first check
+          periodSeconds: 5           # Check every 5 seconds
+          timeoutSeconds: 2          # Request timeout
+          successThreshold: 1        # Success after 1 check
+          failureThreshold: 3        # Fail after 3 consecutive failures
+        
+        # LIVENESS PROBE (HTTP)
+        # Determines if container should be restarted
+        # Failure = container killed and restarted
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 10    # Wait before first check
+          periodSeconds: 10          # Check every 10 seconds
+          timeoutSeconds: 2
+          successThreshold: 1
+          failureThreshold: 3        # Restart after 3 failures
+        
+        # STARTUP PROBE (optional, for slow-starting apps)
+        # Protects slow starting containers from liveness probe
+        startupProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 0
+          periodSeconds: 2
+          timeoutSeconds: 2
+          successThreshold: 1
+          failureThreshold: 30       # Allow 60s for startup (30 * 2s)
+        
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      
+      volumes:
+      - name: app-code
+        configMap:
+          name: health-app
+
+---
+# TCP probe example - alternative deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: health-demo-tcp
+  namespace: health-demo
+  labels:
+    app: health-demo-tcp
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: health-demo-tcp
+  template:
+    metadata:
+      labels:
+        app: health-demo-tcp
+    spec:
+      containers:
+      - name: app
+        image: python:3.9-slim
+        ports:
+        - containerPort: 8080
+        command:
+        - /bin/sh
+        - -c
+        - |
+          pip install flask > /dev/null 2>&1
+          python /app/app.py
+        volumeMounts:
+        - name: app-code
+          mountPath: /app
+        
+        # TCP READINESS PROBE
+        # Simply checks if port is accepting connections
+        readinessProbe:
+          tcpSocket:
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 3
+        
+        # TCP LIVENESS PROBE
+        livenessProbe:
+          tcpSocket:
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 3
+        
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+      
+      volumes:
+      - name: app-code
+        configMap:
+          name: health-app
+
+---
+# Service to expose the application
+apiVersion: v1
+kind: Service
+metadata:
+  name: health-demo-service
+  namespace: health-demo
+spec:
+  type: LoadBalancer  # Or NodePort for local testing
+  selector:
+    app: health-demo
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+
+---
+# Service for TCP probe deployment
+apiVersion: v1
+kind: Service
+metadata:
+  name: health-demo-tcp-service
+  namespace: health-demo
+spec:
+  type: ClusterIP
+  selector:
+    app: health-demo-tcp
+  ports:
+  - port: 80
+    targetPort: 8080
+
+---
+# Testing pod to simulate traffic and failures
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-client
+  namespace: health-demo
+spec:
+  containers:
+  - name: curl
+    image: curlimages/curl:latest
+    command: ['sleep', '3600']

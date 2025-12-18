@@ -1,0 +1,24 @@
+# namespaces.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app-dev
+  labels:
+    environment: development
+    team: platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app-staging
+  labels:
+    environment: staging
+    team: platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app-prod
+  labels:
+    environment: production
+    team: platform

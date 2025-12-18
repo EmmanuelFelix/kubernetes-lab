@@ -1,0 +1,150 @@
+# 1. App with CrashLoopBackOff scenario
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  DATABASE_URL: "postgres://db:5432/myapp"
+  APP_ENV: "production"
+
+---
+# Deployment that will crash (missing secret)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: buggy-app
+  labels:
+    app: buggy-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: buggy-app
+  template:
+    metadata:
+      labels:
+        app: buggy-app
+    spec:
+      # InitContainer for diagnostics
+      initContainers:
+      - name: check-dependencies
+        image: busybox:1.35
+        command: ['sh', '-c']
+        args:
+        - |
+          echo "=== Init Container Diagnostics ==="
+          echo "Checking environment..."
+          echo "DATABASE_URL: $DATABASE_URL"
+          echo "Checking if database is reachable..."
+          nc -zv db-service 5432 || echo "WARNING: Database not reachable"
+          echo "Init container completed"
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DATABASE_URL
+      
+      containers:
+      - name: app
+        image: busybox:1.35
+        command: ['sh', '-c']
+        args:
+        - |
+          echo "Starting application..."
+          echo "Environment: $APP_ENV"
+          echo "Database URL: $DATABASE_URL"
+          
+          # Simulate checking for required secret
+          if [ -z "$DB_PASSWORD" ]; then
+            echo "ERROR: DB_PASSWORD not set!"
+            echo "Application cannot start without database credentials"
+            exit 1
+          fi
+          
+          echo "App started successfully"
+          # Keep running
+          while true; do
+            echo "App is running... $(date)"
+            sleep 30
+          done
+        env:
+        - name: APP_ENV
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: APP_ENV
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DATABASE_URL
+        # Missing secret reference - causes crash
+        # - name: DB_PASSWORD
+        #   valueFrom:
+        #     secretKeyRef:
+        #       name: db-secret
+        #       key: password
+
+---
+# Working deployment for comparison
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: working-app
+  labels:
+    app: working-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: working-app
+  template:
+    metadata:
+      labels:
+        app: working-app
+    spec:
+      containers:
+      - name: app
+        image: busybox:1.35
+        command: ['sh', '-c']
+        args:
+        - |
+          echo "Working app started at $(date)"
+          while true; do
+            echo "Processing request... $(date)"
+            sleep 10
+          done
+
+---
+# Example deployment that crashes and restarts
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flaky-app
+  labels:
+    app: flaky-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flaky-app
+  template:
+    metadata:
+      labels:
+        app: flaky-app
+    spec:
+      containers:
+      - name: app
+        image: busybox:1.35
+        command: ['sh', '-c']
+        args:
+        - |
+          echo "Starting flaky app at $(date)"
+          echo "Simulating work..."
+          sleep 5
+          echo "ERROR: Unexpected condition occurred!"
+          echo "Stack trace: line 42 in main.py"
+          exit 1
+        restartPolicy: Always

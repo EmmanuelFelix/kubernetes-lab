@@ -1,0 +1,164 @@
+---
+# Namespace with Pod Security Standards enforcement
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: secure-app
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+
+---
+# ConfigMap for nginx configuration (running on port 8080 as non-root)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: secure-app
+data:
+  nginx.conf: |
+    worker_processes auto;
+    pid /tmp/nginx.pid;
+    
+    events {
+        worker_connections 1024;
+    }
+    
+    http {
+        include /etc/nginx/mime.types;
+        default_type application/octet-stream;
+        
+        # Temporary paths for non-root user
+        client_body_temp_path /tmp/client_temp;
+        proxy_temp_path /tmp/proxy_temp;
+        fastcgi_temp_path /tmp/fastcgi_temp;
+        uwsgi_temp_path /tmp/uwsgi_temp;
+        scgi_temp_path /tmp/scgi_temp;
+        
+        sendfile on;
+        keepalive_timeout 65;
+        
+        server {
+            listen 8080;
+            server_name localhost;
+            
+            location / {
+                root /usr/share/nginx/html;
+                index index.html index.htm;
+            }
+            
+            error_page 500 502 503 504 /50x.html;
+            location = /50x.html {
+                root /usr/share/nginx/html;
+            }
+        }
+    }
+
+---
+# Hardened Deployment with security best practices
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: secure-nginx
+  namespace: secure-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: secure-nginx
+  template:
+    metadata:
+      labels:
+        app: secure-nginx
+    spec:
+      # Security Context at Pod level
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101  # nginx user in alpine image
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      
+      containers:
+      - name: nginx
+        image: nginx:1.25-alpine
+        ports:
+        - containerPort: 8080
+          name: http
+        
+        # Security Context at Container level
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 101
+          capabilities:
+            drop:
+            - ALL
+        
+        # Override default command to use our config
+        command: ["nginx"]
+        args: ["-c", "/etc/nginx/custom/nginx.conf", "-g", "daemon off;"]
+        
+        # Volume mounts for writable directories nginx needs
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/custom
+        - name: cache
+          mountPath: /var/cache/nginx
+        - name: run
+          mountPath: /var/run
+        - name: tmp
+          mountPath: /tmp
+        
+        # Resource limits (good practice)
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+        
+        # Health checks
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      
+      # Volumes
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: nginx-config
+      - name: cache
+        emptyDir: {}
+      - name: run
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
+
+---
+# Service to expose the application
+apiVersion: v1
+kind: Service
+metadata:
+  name: secure-nginx
+  namespace: secure-app
+spec:
+  selector:
+    app: secure-nginx
+  ports:
+  - port: 80
+    targetPort: 8080
+  type: ClusterIP

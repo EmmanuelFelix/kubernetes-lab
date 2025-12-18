@@ -1,0 +1,68 @@
+apiVersion: v1
+items:
+- apiVersion: v1
+  kind: Service
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/last-applied-configuration: |
+        {"apiVersion":"v1","kind":"Service","metadata":{"annotations":{},"name":"mysql-service","namespace":"production-app"},"spec":{"ports":[{"port":3306,"targetPort":3306}],"selector":{"app":"mysql"}}}
+    creationTimestamp: "2025-12-18T19:28:41Z"
+    name: mysql-service
+    namespace: production-app
+    resourceVersion: "42507"
+    uid: 617845bc-e409-4ef3-94a9-e7d1c2cbf042
+  spec:
+    clusterIP: 10.96.78.39
+    clusterIPs:
+    - 10.96.78.39
+    internalTrafficPolicy: Cluster
+    ipFamilies:
+    - IPv4
+    ipFamilyPolicy: SingleStack
+    ports:
+    - port: 3306
+      protocol: TCP
+      targetPort: 3306
+    selector:
+      app: mysql
+    sessionAffinity: None
+    type: ClusterIP
+  status:
+    loadBalancer: {}
+- apiVersion: v1
+  kind: Service
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/last-applied-configuration: |
+        {"apiVersion":"v1","kind":"Service","metadata":{"annotations":{},"labels":{"app":"nginx"},"name":"nginx-service","namespace":"production-app"},"spec":{"ports":[{"port":80,"targetPort":80}],"selector":{"app":"nginx"},"type":"LoadBalancer"}}
+    creationTimestamp: "2025-12-18T19:28:41Z"
+    labels:
+      app: nginx
+    name: nginx-service
+    namespace: production-app
+    resourceVersion: "42526"
+    uid: 13234183-6915-46cc-9da0-cf409f07bbf5
+  spec:
+    allocateLoadBalancerNodePorts: true
+    clusterIP: 10.96.143.53
+    clusterIPs:
+    - 10.96.143.53
+    externalTrafficPolicy: Cluster
+    internalTrafficPolicy: Cluster
+    ipFamilies:
+    - IPv4
+    ipFamilyPolicy: SingleStack
+    ports:
+    - nodePort: 30235
+      port: 80
+      protocol: TCP
+      targetPort: 80
+    selector:
+      app: nginx
+    sessionAffinity: None
+    type: LoadBalancer
+  status:
+    loadBalancer: {}
+kind: List
+metadata:
+  resourceVersion: ""

@@ -1,0 +1,189 @@
+# =========================================
+# 1. CREATE NAMESPACE
+# =========================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-ingress
+---
+# =========================================
+# 2. DEPLOY SAMPLE APPLICATIONS
+# =========================================
+# App 1: Hello Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-app
+  namespace: demo-ingress
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hello
+  template:
+    metadata:
+      labels:
+        app: hello
+    spec:
+      containers:
+      - name: hello
+        image: hashicorp/http-echo
+        args:
+        - "-text=Hello from App 1!"
+        ports:
+        - containerPort: 5678
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-service
+  namespace: demo-ingress
+spec:
+  selector:
+    app: hello
+  ports:
+  - port: 80
+    targetPort: 5678
+---
+# App 2: World Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: world-app
+  namespace: demo-ingress
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: world
+  template:
+    metadata:
+      labels:
+        app: world
+    spec:
+      containers:
+      - name: world
+        image: hashicorp/http-echo
+        args:
+        - "-text=Hello from App 2 (World)!"
+        ports:
+        - containerPort: 5678
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: world-service
+  namespace: demo-ingress
+spec:
+  selector:
+    app: world
+  ports:
+  - port: 80
+    targetPort: 5678
+---
+# =========================================
+# 3. INSTALL CERT-MANAGER (ClusterIssuer)
+# =========================================
+# Note: Install cert-manager first with:
+# kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+
+# Self-signed ClusterIssuer
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+---
+# CA Certificate for signing
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: selfsigned-ca
+  namespace: demo-ingress
+spec:
+  isCA: true
+  commonName: demo-ca
+  secretName: selfsigned-ca-secret
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  issuerRef:
+    name: selfsigned-issuer
+    kind: ClusterIssuer
+---
+# CA Issuer using the CA cert
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: ca-issuer
+  namespace: demo-ingress
+spec:
+  ca:
+    secretName: selfsigned-ca-secret
+---
+# =========================================
+# 4. INGRESS WITH TLS (NGINX)
+# =========================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: demo-ingress
+  namespace: demo-ingress
+  annotations:
+    cert-manager.io/issuer: "ca-issuer"
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - hello.local.dev
+    - world.local.dev
+    secretName: demo-tls-secret
+  rules:
+  - host: hello.local.dev
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: hello-service
+            port:
+              number: 80
+  - host: world.local.dev
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: world-service
+            port:
+              number: 80
+---
+# =========================================
+# 5. ALTERNATIVE: TRAEFIK INGRESS ROUTE
+# =========================================
+# Uncomment if using Traefik instead of NGINX
+# apiVersion: traefik.containo.us/v1alpha1
+# kind: IngressRoute
+# metadata:
+#   name: demo-ingressroute
+#   namespace: demo-ingress
+# spec:
+#   entryPoints:
+#     - websecure
+#   routes:
+#   - match: Host(`hello.traefik.dev`)
+#     kind: Rule
+#     services:
+#     - name: hello-service
+#       port: 80
+#   - match: Host(`world.traefik.dev`)
+#     kind: Rule
+#     services:
+#     - name: world-service
+#       port: 80
+#   tls:
+#     secretName: demo-tls-secret

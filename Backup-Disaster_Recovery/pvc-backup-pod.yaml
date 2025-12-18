@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pvc-backup-pod
+  namespace: production-app
+spec:
+  containers:
+  - name: backup
+    image: alpine:latest
+    command: ["/bin/sh"]
+    args: ["-c", "tar czf /backup/mysql-data-$(date +%Y%m%d-%H%M%S).tar.gz -C /data . && sleep 3600"]
+    volumeMounts:
+    - name: mysql-data
+      mountPath: /data
+    - name: backup-storage
+      mountPath: /backup
+  volumes:
+  - name: mysql-data
+    persistentVolumeClaim:
+      claimName: mysql-pvc
+  - name: backup-storage
+    hostPath:
+      path: /tmp/k8s-backups
+      type: DirectoryOrCreate
+  restartPolicy: Never

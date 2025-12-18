@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: staging
+bases:
+- ../../base
+
+namePrefix: staging-
+
+commonLabels:
+  env: staging
+  tier: pre-production
+
+replicas:
+- name: myapp
+  count: 2
+
+images:
+- name: myapp
+  newTag: dev-latest
